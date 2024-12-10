@@ -11,9 +11,8 @@ export async function initializeSwc() {
       try {
         await initSwc();
         isInitialized = true;
-      } catch (error) {
-        console.error("Failed to initialize SWC:", error);
-        throw error;
+      } catch (error: any) {
+        throw new Error("Failed to initialize SWC", error);
       }
     })();
   }
@@ -21,9 +20,18 @@ export async function initializeSwc() {
   return initializationPromise;
 }
 
-export function transpileTypeScript(code: string): string {
+export interface TranspileResult {
+  success: boolean;
+  code?: string;
+  error?: string;
+}
+
+export function transpileTypeScript(code: string): TranspileResult {
   if (!isInitialized) {
-    throw new Error("SWC is not initialized yet");
+    return {
+      success: false,
+      error: "SWC is not initialized yet",
+    };
   }
 
   try {
@@ -41,14 +49,18 @@ export function transpileTypeScript(code: string): string {
       minify: false,
     });
 
-    return output.code;
+    return {
+      success: true,
+      code: output.code,
+    };
   } catch (error) {
-    console.error("Transpilation error:", error);
-    return `// Error during transpilation:\n// ${error}`;
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
   }
 }
 
-// Add a check function to verify initialization status
 export function isSwcInitialized(): boolean {
   return isInitialized;
 }

@@ -4,7 +4,6 @@ import { cn } from "@/lib/utils";
 import { useState, useEffect, useCallback, memo } from "react";
 import { Loader2 } from "lucide-react";
 import { initializeSwc, transpileTypeScript } from "@/lib/swc-utils";
-import { useDebouncedCallback } from "use-debounce";
 
 interface EditorProps {
   value?: string;
@@ -27,33 +26,66 @@ export const Editor = memo(function Editor({
 }: EditorProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [editorValue, setEditorValue] = useState(value);
-  const [isSwcInitialized, setIsSwcInitialized] = useState(false);
 
-  // Only update editor value when switching tabs
   useEffect(() => {
     setEditorValue(value);
   }, [value]);
 
-  // Initialize SWC only once
   useEffect(() => {
-    initializeSwc().catch(console.error);
+    initializeSwc().catch((error) => {
+      console.error("Failed to initialize SWC:", error);
+    });
   }, []);
 
-  // Debounce the transpilation to avoid unnecessary compilations
-  const debouncedTranspile = useDebouncedCallback(
-    (code: string) => {
-      if (!isOutput && isSwcInitialized) {
-        try {
-          const transpiledCode = transpileTypeScript(code);
-          onTranspiled?.(transpiledCode);
-        } catch (error) {
-          console.error("Transpilation error:", error);
-          onTranspiled?.(`// Error during transpilation:\n// ${error}`);
+  const handleEditorDidMount = useCallback((editor: any, monaco: any) => {
+    setIsLoading(false);
+
+    monaco.languages.typescript.typescriptDefaults.addExtraLib(
+      `
+      declare module "~jsd/banking" {
+        export type AccountType = "checking" | "savings" | "investment";
+        export interface Transaction {
+          id: string;
+          amount: number;
+          date: Date;
+          description: string;
+          transactionType: "deposit" | "withdrawal" | "transfer";
+          status: "pending" | "completed" | "failed";
+        }
+        export interface Account {
+          id: string;
+          accountType: AccountType;
+          balance: number;
+          currency: string;
+          owner: string;
+          transactions: Transaction[];
+        }
+        export class Banking {
+          constructor(apiKey: string);
+          createAccount(accountType: AccountType, owner: string, initialDeposit?: number): Promise<Account>;
+          getAccount(accountId: string): Promise<Account>;
+          deposit(accountId: string, amount: number, description?: string): Promise<Transaction>;
+          withdraw(accountId: string, amount: number, description?: string): Promise<Transaction>;
+          transfer(fromAccountId: string, toAccountId: string, amount: number, description?: string): Promise<Transaction>;
+          getTransactionHistory(accountId: string, limit?: number): Promise<Transaction[]>;
         }
       }
-    },
-    300 // 300ms debounce delay
-  );
+      `,
+      "file:///node_modules/@types/banking/index.d.ts"
+    );
+
+    monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
+      target: monaco.languages.typescript.ScriptTarget.ES2020,
+      allowNonTsExtensions: true,
+      moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+      module: monaco.languages.typescript.ModuleKind.ESNext,
+      noEmit: true,
+      esModuleInterop: true,
+      jsx: monaco.languages.typescript.JsxEmit.React,
+      strict: true,
+      strictNullChecks: true,
+    });
+  }, []);
 
   const handleEditorChange = useCallback(
     (newValue: string | undefined) => {
@@ -61,9 +93,15 @@ export const Editor = memo(function Editor({
 
       setEditorValue(newValue);
       onChange?.(newValue);
-      debouncedTranspile(newValue);
+
+      if (!isOutput) {
+        const result = transpileTypeScript(newValue);
+        if (result.success && result.code) {
+          onTranspiled?.(result.code);
+        }
+      }
     },
-    [isOutput, onChange, debouncedTranspile]
+    [isOutput, onChange, onTranspiled]
   );
 
   return (
@@ -80,6 +118,7 @@ export const Editor = memo(function Editor({
         theme="vs-dark"
         value={editorValue}
         onChange={handleEditorChange}
+        onMount={handleEditorDidMount}
         options={{
           readOnly,
           minimap: { enabled: false },
@@ -99,7 +138,6 @@ export const Editor = memo(function Editor({
             horizontalScrollbarSize: 10,
           },
         }}
-        onMount={() => setIsLoading(false)}
         className="rounded-md border border-zinc-800"
       />
     </div>
